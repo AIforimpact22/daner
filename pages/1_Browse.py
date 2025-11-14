@@ -1,16 +1,17 @@
 from __future__ import annotations
 import math
-from pathlib import Path
 from html import escape
-import sqlite3
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import create_engine
 
 # ====================== CONFIG ======================
 st.set_page_config(page_title="Car Inventory", page_icon="🚗", layout="wide")
 
-DB_PATH = Path("/workspaces/daner/store.db")
+# Use your Neon connection string here:
+# Example: "postgresql://user:pass@host/dbname?sslmode=require&channel_binding=require"
+DB_URL = "postgresql://neondb_owner:npg_oaL4zTcPq7vI@ep-bitter-meadow-ag6jeaxp-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 ALL_COLUMNS = [
     "StockNo","Make","Model","Year","Trim","BodyStyle","Transmission","Fuel","Engine","Drivetrain",
@@ -25,40 +26,38 @@ NUM_COLS = ["Year","Mileage","Price"]
 
 # ====================== HELPERS ======================
 @st.cache_data
-def load_db(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"{path} not found")
+def load_db(db_url: str) -> pd.DataFrame:
+    engine = create_engine(db_url)
 
-    conn = sqlite3.connect(path)
-    try:
+    with engine.connect() as conn:
+        # Assume Postgres stored everything in lowercase: store, stockno, make, etc.
+        # We alias them back to the camel-case column names your app expects.
         df = pd.read_sql(
             """
             SELECT
-                StockNo,
-                Make,
-                Model,
-                Year,
-                Trim,
-                BodyStyle,
-                Transmission,
-                Fuel,
-                Engine,
-                Drivetrain,
-                Mileage,
-                ExteriorColor,
-                InteriorColor,
-                VIN,
-                Price,
-                Condition,
-                Features,
-                Location,
-                Photo_URL AS Photo
-            FROM Store
+                stockno        AS "StockNo",
+                make           AS "Make",
+                model          AS "Model",
+                year           AS "Year",
+                trim           AS "Trim",
+                bodystyle      AS "BodyStyle",
+                transmission   AS "Transmission",
+                fuel           AS "Fuel",
+                engine         AS "Engine",
+                drivetrain     AS "Drivetrain",
+                mileage        AS "Mileage",
+                exteriorcolor  AS "ExteriorColor",
+                interiorcolor  AS "InteriorColor",
+                vin            AS "VIN",
+                price          AS "Price",
+                condition      AS "Condition",
+                features       AS "Features",
+                location       AS "Location",
+                photo_url      AS "Photo"
+            FROM store;
             """,
             conn,
         )
-    finally:
-        conn.close()
 
     # Ensure all expected columns exist
     for col in ALL_COLUMNS:
@@ -110,10 +109,7 @@ def apply_multi_filter(df, col, values):
 
 # ====================== LOAD ======================
 try:
-    df = load_db(DB_PATH)
-except FileNotFoundError as e:
-    st.error(f"Missing database file: {e}")
-    st.stop()
+    df = load_db(DB_URL)
 except Exception as e:
     st.error(f"Error loading data from database: {e}")
     st.stop()
