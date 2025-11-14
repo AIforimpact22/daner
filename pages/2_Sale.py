@@ -9,9 +9,12 @@ from sqlalchemy.exc import IntegrityError
 # ====================== CONFIG ======================
 st.set_page_config(page_title="Record Sale", page_icon="💸", layout="centered")
 
-# Use the same Neon connection string you used on the other pages
-DB_URL = "postgresql://neondb_owner:YOUR_PASSWORD@YOUR_HOST/neondb?sslmode=require&channel_binding=require"
+# Get DB URL from Streamlit secrets (set DB_URL in .streamlit/secrets.toml)
+DB_URL = st.secrets.get("DB_URL")
 
+if not DB_URL:
+    st.error("Database URL not found. Please set DB_URL in Streamlit secrets.")
+    st.stop()
 
 # ====================== DB HELPERS ======================
 def get_engine():
@@ -70,7 +73,6 @@ def load_unsold_cars(db_url: str) -> pd.DataFrame:
 
 
 def record_sale(
-    db_url: str,
     stock_no: str,
     sale_date: date,
     sale_price: float,
@@ -175,7 +177,6 @@ with st.form("sale_form"):
             salesperson_id = int(salesperson_id_raw) if salesperson_id_raw > 0 else None
             try:
                 record_sale(
-                    DB_URL,
                     stock_no=selected_stock_no,
                     sale_date=sale_date,
                     sale_price=sale_price,
