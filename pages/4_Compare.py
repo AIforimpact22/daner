@@ -1,16 +1,17 @@
 from pathlib import Path
+import sqlite3
+from io import BytesIO
+
 import pandas as pd
 import streamlit as st
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
-from io import BytesIO
-
 
 # ======================================================
 # CONFIG
 # ======================================================
-DATA_PATH = Path("/workspaces/daner/data.csv")
+DB_PATH = Path("/workspaces/daner/store.db")
 st.set_page_config(page_title="Compare Models", page_icon="⚖️", layout="wide")
 
 st.title("⚖️ Compare Car Models")
@@ -21,8 +22,35 @@ st.caption("Compare two car models and instantly export a PDF report.")
 # HELPERS
 # ======================================================
 @st.cache_data
-def load_csv(path):
-    df = pd.read_csv(path)
+def load_df(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found")
+
+    conn = sqlite3.connect(path)
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                Make,
+                Model,
+                Trim,
+                Year,
+                Mileage,
+                Price,
+                Condition,
+                Fuel,
+                Engine,
+                Drivetrain,
+                Transmission,
+                BodyStyle,
+                Location,
+                Photo_URL AS Photo
+            FROM Store
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
 
     required = [
         "Make","Model","Trim","Year","Mileage","Price","Condition","Fuel",
@@ -44,12 +72,17 @@ def load_csv(path):
 
 
 def fmt_money(v):
-    try: return f"${int(v):,}"
-    except: return "—"
+    try:
+        return f"${int(v):,}"
+    except:
+        return "—"
+
 
 def fmt_km(v):
-    try: return f"{int(v):,} km"
-    except: return "—"
+    try:
+        return f"{int(v):,} km"
+    except:
+        return "—"
 
 
 def make_pdf(summary_a, summary_b, label_a, label_b):
@@ -99,13 +132,18 @@ def make_pdf(summary_a, summary_b, label_a, label_b):
 # ======================================================
 # LOAD DATA
 # ======================================================
-if not DATA_PATH.exists():
-    st.error("CSV not found.")
+if not DB_PATH.exists():
+    st.error("Database not found.")
     st.stop()
 
-df = load_csv(DATA_PATH)
+try:
+    df = load_df(DB_PATH)
+except Exception as e:
+    st.error(f"Error loading data from DB: {e}")
+    st.stop()
+
 if df.empty:
-    st.error("CSV contains no data.")
+    st.error("Database contains no data in Store table.")
     st.stop()
 
 
@@ -116,18 +154,22 @@ with st.sidebar:
     st.header("Select Models to Compare")
 
     makes = sorted(df["Make"].dropna().unique())
+    if not makes:
+        st.error("No makes found in database.")
+        st.stop()
+
     make_a = st.selectbox("Make A", makes)
     make_b = st.selectbox("Make B", makes)
 
     models_a = sorted(df[df["Make"] == make_a]["Model"].dropna().unique())
     models_b = sorted(df[df["Make"] == make_b]["Model"].dropna().unique())
 
-    model_a = st.selectbox("Model A", models_a)
-    model_b = st.selectbox("Model B", models_b)
+    model_a = st.selectbox("Model A", models_a if len(models_a) else ["(none)"])
+    model_b = st.selectbox("Model B", models_b if len(models_b) else ["(none)"])
 
     st.markdown("---")
     show_table = st.checkbox("Show Raw Tables", True)
-    show_chart = st.checkbox("Show Price Chart", True)
+    show_chart = st.checkbox("Show Price Chart", True)  # kept for future use if you add charts
 
 
 # ======================================================
@@ -144,17 +186,17 @@ if car_a.empty or car_b.empty:
 # ======================================================
 # SUMMARIES
 # ======================================================
-def model_summary(df):
+def model_summary(df_model):
     return {
-        "Count": len(df),
-        "Min Price": fmt_money(df["Price"].min()),
-        "Max Price": fmt_money(df["Price"].max()),
-        "Average Price": fmt_money(df["Price"].mean()),
-        "Median Price": fmt_money(df["Price"].median()),
-        "Average Mileage": fmt_km(df["Mileage"].mean()),
-        "Year Range": f"{int(df['Year'].min())} - {int(df['Year'].max())}",
-        "Common Fuel": df["Fuel"].mode()[0] if df["Fuel"].dropna().any() else "—",
-        "Common Drivetrain": df["Drivetrain"].mode()[0] if df["Drivetrain"].dropna().any() else "—",
+        "Count": len(df_model),
+        "Min Price": fmt_money(df_model["Price"].min()),
+        "Max Price": fmt_money(df_model["Price"].max()),
+        "Average Price": fmt_money(df_model["Price"].mean()),
+        "Median Price": fmt_money(df_model["Price"].median()),
+        "Average Mileage": fmt_km(df_model["Mileage"].mean()),
+        "Year Range": f"{int(df_model['Year'].min())} - {int(df_model['Year'].max())}",
+        "Common Fuel": df_model["Fuel"].mode()[0] if df_model["Fuel"].dropna().any() else "—",
+        "Common Drivetrain": df_model["Drivetrain"].mode()[0] if df_model["Drivetrain"].dropna().any() else "—",
     }
 
 sum_a = model_summary(car_a)

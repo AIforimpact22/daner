@@ -2,13 +2,15 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from html import escape
+import sqlite3
 
 import pandas as pd
 import streamlit as st
 
 # ====================== CONFIG ======================
 st.set_page_config(page_title="Car Inventory", page_icon="🚗", layout="wide")
-DATA_PATH = Path("/workspaces/daner/data.csv")
+
+DB_PATH = Path("/workspaces/daner/store.db")
 
 ALL_COLUMNS = [
     "StockNo","Make","Model","Year","Trim","BodyStyle","Transmission","Fuel","Engine","Drivetrain",
@@ -23,52 +25,98 @@ NUM_COLS = ["Year","Mileage","Price"]
 
 # ====================== HELPERS ======================
 @st.cache_data
-def load_csv(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
+def load_db(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found")
+
+    conn = sqlite3.connect(path)
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                StockNo,
+                Make,
+                Model,
+                Year,
+                Trim,
+                BodyStyle,
+                Transmission,
+                Fuel,
+                Engine,
+                Drivetrain,
+                Mileage,
+                ExteriorColor,
+                InteriorColor,
+                VIN,
+                Price,
+                Condition,
+                Features,
+                Location,
+                Photo_URL AS Photo
+            FROM Store
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
+
+    # Ensure all expected columns exist
     for col in ALL_COLUMNS:
         if col not in df.columns:
             df[col] = pd.NA
+
+    # Type clean-up
     for col in NUM_COLS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
     for col in TEXT_COLS:
         df[col] = df[col].astype("string").str.strip()
+
     return df[[c for c in ALL_COLUMNS if c in df.columns]]
 
 def fmt_money(x):
-    try: return f"${int(round(float(x))):,}"
-    except: return "—"
+    try:
+        return f"${int(round(float(x))):,}"
+    except:
+        return "—"
 
 def fmt_km(x):
-    try: return f"{int(round(float(x))):,} km"
-    except: return "—"
+    try:
+        return f"{int(round(float(x))):,} km"
+    except:
+        return "—"
 
 def feature_chips(features: str) -> str:
-    if features is pd.NA: return ""
+    if features is pd.NA:
+        return ""
     parts = [p.strip() for p in str(features).replace("|",";").split(";") if p.strip()]
     return "".join(f'<span class="chip">{escape(p)}</span>' for p in parts[:12])
 
 def numeric_bounds(s: pd.Series, default=(0,1)):
     s = pd.to_numeric(s, errors="coerce").dropna()
-    if s.empty: return default
+    if s.empty:
+        return default
     lo, hi = int(s.min()), int(s.max())
     return (lo, hi if lo != hi else lo+1)
 
 def text_match(row, fields, q):
     q = (q or "").lower().strip()
-    if not q: return True
+    if not q:
+        return True
     return any(q in str(row.get(f,"")).lower() for f in fields)
 
 def apply_multi_filter(df, col, values):
     return df[df[col].isin(values)] if values else df
 
 # ====================== LOAD ======================
-if DATA_PATH.exists():
-    df = load_csv(DATA_PATH)
-else:
-    st.warning(f"Missing `{DATA_PATH}`. Upload file to proceed.")
-    up = st.file_uploader("Upload CSV", type=["csv"])
-    if not up: st.stop()
-    df = pd.read_csv(up)
+try:
+    df = load_db(DB_PATH)
+except FileNotFoundError as e:
+    st.error(f"Missing database file: {e}")
+    st.stop()
+except Exception as e:
+    st.error(f"Error loading data from database: {e}")
+    st.stop()
 
 # ====================== UI ======================
 st.title("🚗 Browse Inventory")
@@ -92,17 +140,20 @@ with st.sidebar:
     if "Price" in df:
         lo, hi = numeric_bounds(df["Price"], (0,100000))
         f_price = st.slider("Price", lo, hi, (lo, hi))
-    else: f_price = None
+    else:
+        f_price = None
 
     if "Mileage" in df:
         lo, hi = numeric_bounds(df["Mileage"], (0,300000))
         f_mileage = st.slider("Mileage", lo, hi, (lo, hi))
-    else: f_mileage = None
+    else:
+        f_mileage = None
 
     if "Year" in df:
         lo, hi = numeric_bounds(df["Year"], (1990,2035))
         f_year = st.slider("Year", lo, hi, (lo, hi))
-    else: f_year = None
+    else:
+        f_year = None
 
     sort_by = st.selectbox("Sort by", ["Price","Year","Mileage","Make","Model","StockNo"])
     sort_dir = st.radio("Order", ["Ascending","Descending"], index=1)
@@ -110,8 +161,10 @@ with st.sidebar:
 
 # ---- filtering ----
 filtered = df.copy()
-filtered = filtered[filtered.apply(lambda r: text_match(r,
-    ["Make","Model","Trim","StockNo","VIN"], q), axis=1)]
+filtered = filtered[filtered.apply(
+    lambda r: text_match(r, ["Make","Model","Trim","StockNo","VIN"], q),
+    axis=1
+)]
 
 for col, val in [
     ("Make", f_make),
