@@ -9,9 +9,12 @@ from sqlalchemy import create_engine
 # ====================== CONFIG ======================
 st.set_page_config(page_title="Car Inventory", page_icon="🚗", layout="wide")
 
-# Use your Neon connection string here:
-# Example: "postgresql://user:pass@host/dbname?sslmode=require&channel_binding=require"
-DB_URL = "postgresql://neondb_owner:npg_oaL4zTcPq7vI@ep-bitter-meadow-ag6jeaxp-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# Get DB URL from Streamlit secrets
+DB_URL = st.secrets.get("DB_URL")
+
+if not DB_URL:
+    st.error("Database URL not found. Please set DB_URL in Streamlit secrets.")
+    st.stop()
 
 ALL_COLUMNS = [
     "StockNo","Make","Model","Year","Trim","BodyStyle","Transmission","Fuel","Engine","Drivetrain",
@@ -30,8 +33,6 @@ def load_db(db_url: str) -> pd.DataFrame:
     engine = create_engine(db_url)
 
     with engine.connect() as conn:
-        # Assume Postgres stored everything in lowercase: store, stockno, make, etc.
-        # We alias them back to the camel-case column names your app expects.
         df = pd.read_sql(
             """
             SELECT
